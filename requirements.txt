@@ -1,0 +1,21 @@
+# Requirements for PDF RAG Chat Application
+# Install with: pip install -r requirements.txt
+
+streamlit
+langchain
+langchain-community
+langchain-google-genai
+langchain-core
+langchain-text-splitters
+faiss-cpu
+pypdf
+sentence-transformers
+# For Google GenAI (if needed separately)
+google-generativeai
+# For OCR (if used in main.py)
+pytesseract
+pillow
+
+# Evaluation libraries
+nltk
+rouge-score
