@@ -18,6 +18,9 @@ from langchain_core.prompts import PromptTemplate
 from sentence_transformers import CrossEncoder
 import pickle
 import random
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DOCS_PICKLE_PATH = 'docs.pkl'
 
@@ -82,7 +85,7 @@ else:
 bm25_retriever = BM25Retriever.from_documents(chunks, k=50)
 retriever = vectorstore.as_retriever(search_type='mmr', search_kwargs={'k': 50})  
 ensemble_retriever = EnsembleRetriever(retrievers=[retriever, bm25_retriever], weights=[0.5, 0.5])
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-thinking-exp-01-21", google_api_key="AIzaSyCsDDfm2cUh8GxHP-uu7kshCr4CsuBXB6I")
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite-preview-06-17", google_api_key=os.getenv('gemini'))
 multi_retriever = MultiQueryRetriever.from_llm(retriever=ensemble_retriever, llm=llm)
 
 
@@ -104,7 +107,7 @@ prompt = PromptTemplate(
       3. Link to specific applications or examples from the context (e.g., real-world systems, domains like language processing, vision, or generation).
       4. Synthesize connections between concepts for a holistic view.
     - For simpler questions, provide direct, detailed answers without unnecessary lists.
-    - Include inline citations [source-page: <filename>-<page-no>] for every key point or fact to ground your response, using the "Source" and "Page" metadata provided in the context for each section. STRICTLY follow the format [source-page: filename-pageno] - do NOT include chapter names, section titles, or any other text. Only use the exact filename and page number in this format: filename.pdf-4
+    - Include inline citations [source-page: <filename>-<page-no>] for every key point or fact to ground your response, using the "Source" and "Page" metadata provided in the context for each section. STRICTLY follow the format [source-page: filename-pageno] - do NOT include chapter names, section titles, book name or any other text. Only use the exact filename and page number.
     - If context is insufficient, state what is known and suggest refinements, but do not hallucinate.
 
     Context: {context}
@@ -155,7 +158,7 @@ def enhanced_qa_chain_intermediate(query):
         '''Condense key info from this context for a detailed answer, preserving "Source: filename - Page: x" prefixes ONLY for sections you actually use in the summary: {text}. 
         At the end of your condensed output, add a section "## Used Sources" with citations [source-page: filename-pageNo] ONLY for sources referenced in the summary. 
         Do not include metadata or citations for unused sources. 
-        STRICTLY follow the citation format [source-page: filename-pageno] - do NOT include chapter names, section titles, or any other text. Only use the exact filename and page number in this format: filename.pdf-4
+        STRICTLY follow the citation format [source-page: filename-pageno] - do NOT include chapter names, section titles, or any other text. Only use the exact filename and page number in the given format.
         For example, if you use a section with "Source: source_1.pdf - Page: 59", include [source-page: source_1.pdf-59] in the Used Sources section.''',
         input_variables=["text"]
     )
@@ -188,10 +191,10 @@ def enhanced_qa_chain_intermediate(query):
         refined_query = eval_result.split("refined query:")[-1].strip() if "refined query" in eval_result.lower() else query + " (expand on concepts and applications)"
         refined_result = enhanced_qa_chain_intermediate(refined_query)  # Recursive refinement (limit depth to 2 in production to avoid loops)
         
-        print(f"\n\n this is source_documents : {refined_result['source_documents']}\n\n")
+        #print(f"\n\n this is source_documents : {refined_result['source_documents']}\n\n")
         
         
-        return {'result': refined_result['result'] + "\n\n(Original Response:\n" + result['result'] + ")", 'source_documents': extract_context_from_docs(reranked_docs)}
+        return {'result': refined_result['result'] + "\n\n(Original Response:\n" + result['result'] + ")", 'source_documents': extract_context_from_docs(refined_result['source_documents'])}
     
     return result
 
@@ -202,18 +205,22 @@ def enhanced_qa_chain(query : str) :
     
     # Synthesis step (few-shot prompting for cohesive, expert-style response with TL;DR and sections)
     synthesis_prompt = PromptTemplate(
-        template='''You are an expert scientific and technical writer. The user query is: "{query}"
+        template='''
+        You are an expert scientific and technical writer. The user query is: "{query}"
 
         Synthesize the following intermediate answer into a cohesive, expert-style response. 
         Use the few-shot examples below to guide your style: write narratively with smooth transitions, inline citations [source-page: filename-pageNo], and synthesis of key points without disjointed notes.
 
-        Important: Do NOT shorten or summarize the intermediate answer—reformulate ALL its content into a longer, flowing narrative if needed. The output should be at least as long as the intermediate, combining a TL;DR summary upfront with the full details restructured for better flow. Preserve embedded metadata (e.g., Used Sources sections) from the intermediate, but ONLY include citations and metadata for sources actually referenced in your synthesized content—remove any unused ones.
+        Important: Do NOT shorten or summarize the intermediate answer—reformulate ALL its content into a longer, flowing narrative if needed. The output should be at least as long as the intermediate, combining a TL;DR summary upfront with the full details restructured for better flow. Preserve embedded metadata (e.g., Used Sources sections) from the intermediate, but ONLY include citations and metadata for sources actually referenced in your synthesized content—remove any unused ones. When encountering "Source: filename - Page: x" in the intermediate text, convert them to inline citations in the format [source-page: filename-pageno] while preserving the exact filename. If a "## Used Sources" section exists, use it to validate and include only referenced sources in your output. NEVER omit or replace the filename; if uncertain, retain the original format from the intermediate.
 
-        CRITICAL CITATION FORMAT: STRICTLY follow the format [source-page: filename-pageno] - do NOT include chapter names, section titles, or any other text. Only use the exact filename and page number in this format (this is just an example, USE SOURCE MENTIONED IN YOUR METADATA DO NOT USE THIS EXACTLY): filename.pdf-4
+        CRITICAL CITATION FORMAT: STRICTLY follow the format [source-page: filename-pageno] where filename MUST be the actual PDF filename (containing .pdf extension). Do NOT use book names, chapter names, section titles, or any other text. Only use the exact PDF filename with .pdf extension and page number. If the filename doesn't contain .pdf or you're uncertain about the exact PDF filename, omit that citation entirely.
 
         Few-Shot Example 1:
         Query: Compare the main characters in two novels.
-        Intermediate: Character A is ambitious [source-page: novel1.pdf-3]. Character B is more reserved [source-page: novel2.pdf-5]. Both face challenges in their journeys.
+        Intermediate: Character A is ambitious Source: novel1.pdf - Page: 3. Character B is more reserved Source: novel2.pdf - Page: 5. Both face challenges in their journeys.
+        ## Used Sources
+        [source-page: novel1.pdf-3]
+        [source-page: novel2.pdf-5]
         Synthesized: TL;DR: Character A stands out for ambition, while Character B is defined by a reserved nature; both encounter significant challenges that shape their development [source-page: novel1.pdf-3][source-page: novel2.pdf-5].
 
         Detailed Comparison: Character A's ambition drives much of the plot, leading to both opportunities and conflicts [source-page: novel1.pdf-3]. In contrast, Character B's reserved demeanor results in a more introspective journey, with growth emerging from overcoming personal obstacles [source-page: novel2.pdf-5]. Despite their differences, both characters are shaped by the challenges they face, highlighting the diverse ways individuals respond to adversity.
@@ -231,6 +238,16 @@ def enhanced_qa_chain(query : str) :
         Synthesized: TL;DR: Photosynthesis enables plants to convert sunlight into food, with chlorophyll capturing light and oxygen released as a byproduct [source-page: biologytext.pdf-7][source-page: biologytext.pdf-8][source-page: biologytext.pdf-9].
         Process Details: During photosynthesis, plants absorb sunlight using chlorophyll, a pigment found in their leaves [source-page: biologytext.pdf-8]. This energy is used to convert carbon dioxide and water into glucose, providing essential nourishment for the plant [source-page: biologytext.pdf-7]. As a result of this process, oxygen is released into the atmosphere, supporting life on Earth [source-page: biologytext.pdf-9].
 
+        Few-Shot Example 4 (Citation Extraction):
+        Query: Describe a scientific concept.
+        Intermediate: The concept involves energy conversion Source: sci_book.pdf - Page: 10. It produces byproducts Source: sci_book.pdf - Page: 12.
+        ## Used Sources
+        [source-page: sci_book.pdf-10]
+        [source-page: sci_book.pdf-12]
+        Synthesized: TL;DR: The concept centers on energy conversion and produces specific byproducts [source-page: sci_book.pdf-10][source-page: sci_book.pdf-12].
+
+        Detailed Explanation: This scientific concept primarily involves the conversion of energy from one form to another, as detailed in the source material [source-page: sci_book.pdf-10]. As part of the process, certain byproducts are generated, which have implications for the environment [source-page: sci_book.pdf-12].
+
         Now, synthesize this intermediate answer for the query above:
         {answer}
 
@@ -239,7 +256,7 @@ def enhanced_qa_chain(query : str) :
         - **Introduction** : Use this markdown heading for introducing what the whole response will contain , giving a 3-4 line skimming over all topics.
         - **Detailed Sections**: Use markdown headings for expandable parts (e.g., ## Key Points, ## Process, ## Comparison, ## Applications), ensuring flow and expert tone. Include ALL details from the intermediate, reformulated for better narrative without shortening.
         -*TL;DR**: A conclusion of 3-4 sentence, concise summary of key takeaways.
-        - **CRITICAL:** Preserve embedded metadata from the intermediate (e.g., Used Sources), but ONLY for sources actually referenced in your output—remove or omit unused citations and metadata. In the format [source-page: filename-pageNo] with NO additional text, chapter names, or section titles.
+        - **CRITICAL:** Preserve embedded metadata but ONLY for sources actually referenced in your output—remove or omit unused citations and metadata. Citations must be in the format [source-page: filename.pdf-pageNo] where filename.pdf is the actual PDF file with .pdf extension. If the source doesn't contain .pdf or you're uncertain about the exact PDF filename, omit that citation entirely.
 
         Synthesized Response: 
         ''',

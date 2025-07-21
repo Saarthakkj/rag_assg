@@ -87,15 +87,43 @@ def parse_sources(answer):
     for source, page in sorted(unique_pairs):
         parsed.append({'source': source, 'page': page})
     return parsed
+
+def render_answer_with_buttons(answer: str, message_index: int):
+    """Render answer text and insert reference buttons inline where citations appear."""
+    # Split the answer on citation patterns while keeping the citation tokens.
+    parts = re.split(r"(\[source-page: [^\]]+\])", answer)
+    btn_counter = 0  # Ensure unique keys across a single message
+
+    for part in parts:
+        # If the part is a citation token, create buttons for each citation
+        if part.startswith("[source-page:"):
+            # Extract citation content without the surrounding brackets and prefix
+            citation_body = part[len("[source-page:"): -1]  # removes prefix and trailing ']'
+            # A single token might contain multiple citations separated by commas
+            citations = [c.strip() for c in citation_body.split(',') if '-' in c]
+
+            for cit in citations:
+                source, page_str = cit.rsplit('-', 1)
+                try:
+                    page = int(page_str.strip()) + 1  # pdf_viewer is 1-indexed
+                except ValueError:
+                    continue  # skip malformed citation
+                display_reference(source.strip(), page, message_index, btn_counter)
+                btn_counter += 1
+        else:
+            # Regular text segment — render as markdown
+            if part.strip():  # Avoid rendering empty strings
+                st.markdown(part)
+
 for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message['role']):
-        st.markdown(message['content'])
-        # If it's an assistant message with parsed_sources, regenerate references and buttons
-        if message['role'] == 'assistant' and 'parsed_sources' in message:
-            st.markdown("**References:**")
-            for i, ps in enumerate(message['parsed_sources']):
-                display_reference(ps['source'], ps['page'], idx, i)
-                
+        if message['role'] == 'assistant':
+            # Render answer text interleaving citation buttons
+            render_answer_with_buttons(message['content'], idx)
+        else:
+            # For user messages, simple markdown rendering
+            st.markdown(message['content'])
+    
 prompt = st.chat_input("Ask a question")
 if prompt: 
     st.session_state.messages.append({'role': 'user', 'content': prompt})
@@ -106,11 +134,8 @@ if prompt:
         result = enhanced_qa_chain(prompt)
         answer = result['result']
         parsed_sources = parse_sources(answer)  # Parse sources from answer text
-        st.markdown(answer)
-        # Display references for the new response
-        st.markdown("**References:**")
-        for i, ps in enumerate(parsed_sources):
-            display_reference(ps['source'], ps['page'], len(st.session_state.messages), i)
+        # Render answer with inline buttons
+        render_answer_with_buttons(answer, len(st.session_state.messages))
         
         # Store the full assistant message with parsed_sources
         st.session_state.messages.append({
