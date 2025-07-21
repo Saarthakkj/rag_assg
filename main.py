@@ -25,25 +25,29 @@ load_dotenv()
 DOCS_PICKLE_PATH = 'docs.pkl'
 
 
-def load_pdf_with_ocr(file_path):
+from tqdm import tqdm
 
-    print(f'filepath {file_path}')
-    loader = PyPDFLoader(file_path, extract_images=True)  # Extracts images for OCR
-    pages = loader.load()
-    for page in pages:
-        if page: 
-            # print(f"page has text")
-            continue
-        # If page content is empty (scanned), perform OCR
-        if not page.page_content.strip():
-            print("page content is empty")
-            # Assuming extract_images=True provides image data; otherwise, use pdf2image
-            # For simplicity, integrate pdf2image if needed
-            # This line performs OCR (Optical Character Recognition) on an image extracted from the PDF page.
-            # It loads the image bytes from the page's metadata, converts it to a PIL Image, 
-            # and then uses pytesseract to extract any text from the image, assigning the result to page.page_content.
-            page.page_content = pytesseract.image_to_string(Image.open(io.BytesIO(page.metadata['image'])))
-    return pages
+def load_pdf_with_ocr(file_path): 
+    try :
+        # print(f'filepath {file_path}')
+        loader = PyPDFLoader(file_path)  # Extracts images for OCR
+        pages = loader.load()
+        for page in pages:
+            if page: 
+                # print(f"page has text")
+                continue
+            # If page content is empty (scanned), perform OCR
+            if not page.page_content.strip():
+                print("page content is empty")
+                # Assuming extract_images=True provides image data; otherwise, use pdf2image
+                # For simplicity, integrate pdf2image if needed
+                # This line performs OCR (Optical Character Recognition) on an image extracted from the PDF page.
+                # It loads the image bytes from the page's metadata, converts it to a PIL Image, 
+                # and then uses pytesseract to extract any text from the image, assigning the result to page.page_content.
+                page.page_content = pytesseract.image_to_string(Image.open(io.BytesIO(page.metadata['image'])))
+        return pages
+    except : 
+        print(f"failed")
 
 docs = []
 # for file in os.listdir('pdf_docs'):
@@ -53,21 +57,24 @@ docs = []
         
 #print(f"before if-else")
 if os.path.exists(DOCS_PICKLE_PATH):
+    print("Loading documents from cache...")
     with open(DOCS_PICKLE_PATH, 'rb') as f:
         docs = pickle.load(f)
 else:
     docs = []
     #print(f"else-block")
-    for file in os.listdir('pdf_docs'):
-        if file.endswith('.pdf'):
-            #print(f" file name : {file}")
-            docs.extend(load_pdf_with_ocr(os.path.join('pdf_docs', file)))
+    pdf_files = [file for file in os.listdir('pdf_docs') if file.endswith('.pdf')]
+    for file in tqdm(pdf_files, desc="Loading PDF files"):
+        #print(f" file name : {file}")
+        docs.extend(load_pdf_with_ocr(os.path.join('pdf_docs', file)))
+    print("Saving documents to cache...")
     with open(DOCS_PICKLE_PATH, 'wb') as f:
         pickle.dump(docs, f)
 
 
 
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)  # Overlap for context breadth
+print("Splitting documents into chunks...")
 chunks = splitter.split_documents(docs)
 
 
@@ -76,9 +83,12 @@ embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-
 
 
 if os.path.exists('faiss_index'):
+    print("Loading FAISS index from cache...")
     vectorstore = FAISS.load_local('faiss_index', embeddings, allow_dangerous_deserialization=True)
 else:
+    print("Creating FAISS index from documents...")
     vectorstore = FAISS.from_documents(chunks, embeddings)
+    print("Saving FAISS index...")
     vectorstore.save_local('faiss_index')
 
 
