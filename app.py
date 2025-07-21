@@ -112,6 +112,8 @@ def render_answer_with_buttons(answer: str, message_index: int):
                 btn_counter += 1
         else:
             # Regular text segment — render as markdown
+            if "Used Sources" in part :
+                return
             if part.strip():  # Avoid rendering empty strings
                 st.markdown(part)
 

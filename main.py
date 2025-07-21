@@ -141,7 +141,7 @@ def enhanced_qa_chain_intermediate(query):
     
     # Inject metadata into context for proper citations
     
-    context = extract_context_from_docs(docs)
+    context = extract_context_from_docs(reranked_docs)
     # context_parts = []
     # for doc in reranked_docs:
     #     source = os.path.basename(doc.metadata.get("source", "Unknown Source"))
@@ -167,9 +167,9 @@ def enhanced_qa_chain_intermediate(query):
     # print(f"\n\n  grounded_context_llm repsonse: {grounded_context} \n\n")
     
     # Genyeration using the general prompt
-    qa_input = {'context': grounded_context, 'query': query}
-    #print(f' query : {query} and context : {grounded_context}')
-    result = qa_chain.invoke(qa_input)
+    formatted_prompt = prompt.format(context=grounded_context, question=query)
+    llm_response = llm.invoke(formatted_prompt)
+    result = {'result': llm_response.content, 'source_documents': reranked_docs}
 
     if '## Used Sources' not in result['result']: 
         # if used sources not present -> append top 5 docs from reranked_docs
@@ -194,7 +194,7 @@ def enhanced_qa_chain_intermediate(query):
         #print(f"\n\n this is source_documents : {refined_result['source_documents']}\n\n")
         
         
-        return {'result': refined_result['result'] + "\n\n(Original Response:\n" + result['result'] + ")", 'source_documents': extract_context_from_docs(refined_result['source_documents'])}
+        return {'result': refined_result['result'] + "\n\n(Original Response:\n" + result['result'] + ")", 'source_documents': refined_result['source_documents']}
     
     return result
 
